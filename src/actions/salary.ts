@@ -71,7 +71,13 @@ export async function getSalaryData(year: number, month: number) {
   const daysInMonth = getDaysInMonth(year, month);
 
   const employees = await prisma.user.findMany({
-    where: { role: "EMPLOYEE" },
+    where: {
+      role: "EMPLOYEE",
+      OR: [
+        { joinedAt: null },
+        { joinedAt: { lte: endDate } },
+      ],
+    },
     select: {
       id: true,
       name: true,
@@ -80,20 +86,31 @@ export async function getSalaryData(year: number, month: number) {
     },
   });
 
-  // Batch-fetch stored salary data for this month (bonus + advance deduction)
+  // Batch-fetch stored salary data for this month (bonus + advance deduction + paid status)
   const thisMonthRecords = await prisma.salaryRecord.findMany({
     where: {
       userId: { in: employees.map((e) => e.id) },
       month: startDate,
     },
-    select: { userId: true, eidBonus: true, advanceDeduction: true },
+    select: {
+      userId: true,
+      id: true,
+      eidBonus: true,
+      advanceDeduction: true,
+      paid: true,
+      paidAt: true,
+    },
   });
   const storedEidBonusMap = new Map<string, number>();
   const storedAdvanceMap = new Map<string, number>();
+  const storedRecordMap = new Map<
+    string,
+    { id: string; paid: boolean; paidAt: Date | null }
+  >();
   for (const r of thisMonthRecords) {
     if (r.eidBonus > 0) storedEidBonusMap.set(r.userId, r.eidBonus);
-    if (r.advanceDeduction > 0)
-      storedAdvanceMap.set(r.userId, r.advanceDeduction);
+    storedAdvanceMap.set(r.userId, r.advanceDeduction);
+    storedRecordMap.set(r.userId, { id: r.id, paid: r.paid, paidAt: r.paidAt });
   }
 
   // Check which bonuses have been paid separately
@@ -143,20 +160,22 @@ export async function getSalaryData(year: number, month: number) {
         absentDays += daysWithoutRecords;
       }
 
-      // Use stored advance deduction if payroll already ran, otherwise compute live
-      let advanceDeduction = storedAdvanceMap.get(emp.id);
-      if (advanceDeduction === undefined) {
-        const advances = await prisma.advanceSalary.findMany({
-          where: {
-            userId: emp.id,
-            status: "APPROVED",
-            deductedInSalary: false,
-            requestedAt: { lte: endDate },
-          },
-          select: { amount: true },
-        });
-        advanceDeduction = advances.reduce((sum, a) => sum + a.amount, 0);
-      }
+      // Advance deduction = stored (from payroll) + any new undeducted advances
+      const storedAdvance = storedAdvanceMap.get(emp.id) ?? 0;
+      const newAdvances = await prisma.advanceSalary.findMany({
+        where: {
+          userId: emp.id,
+          status: "APPROVED",
+          deductedInSalary: false,
+          requestedAt: { lte: endDate },
+        },
+        select: { amount: true },
+      });
+      const newAdvanceTotal = newAdvances.reduce(
+        (sum, a) => sum + a.amount,
+        0,
+      );
+      const advanceDeduction = storedAdvance + newAdvanceTotal;
 
       // Use standard 30-day month for daily rate (monthly salary system)
       const dailyRate = emp.monthlySalary / 30;
@@ -170,6 +189,8 @@ export async function getSalaryData(year: number, month: number) {
       const netPayable =
         emp.monthlySalary - attendanceDeduction - advanceDeduction + eidBonus;
 
+      const stored = storedRecordMap.get(emp.id);
+
       return {
         userId: emp.id,
         name: emp.name,
@@ -182,6 +203,9 @@ export async function getSalaryData(year: number, month: number) {
         advanceDeduction,
         eidBonus,
         netPayable,
+        recordId: stored?.id ?? null,
+        paid: stored?.paid ?? false,
+        paidAt: stored?.paidAt ?? null,
       };
     }),
   );
@@ -273,15 +297,7 @@ export async function getSalaryHistory() {
     };
   });
 
-  // Return only the latest record per user to avoid showing the same user across multiple months
-  const latestPerUser = new Map<string, (typeof adjusted)[0]>();
-  for (const record of adjusted) {
-    const existing = latestPerUser.get(record.userId);
-    if (!existing || record.month > existing.month) {
-      latestPerUser.set(record.userId, record);
-    }
-  }
-  return Array.from(latestPerUser.values());
+  return adjusted;
 }
 
 export async function markSalaryPaid(recordId: string) {

@@ -25,7 +25,8 @@ export function EmployeeHeader() {
   const pageTitle = getPageTitle(pathname);
 
   if (loading) return null;
-  if (pathname.startsWith("/admin") || pathname.startsWith("/employee")) return null;
+  if (pathname.startsWith("/admin") || pathname.startsWith("/employee"))
+    return null;
 
   return (
     <header className="sticky top-0 z-30 w-full border-b bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/60">
@@ -34,11 +35,11 @@ export function EmployeeHeader() {
         <div className="flex items-center gap-4">
           <Link href="/" className="flex items-center gap-2">
             <div className="relative">
-              <Wifi className="h-5 w-5 text-primary" />
-              <div className="absolute -right-1 -top-1 h-1.5 w-1.5 rounded-full bg-primary/60" />
+              <Wifi className="h-8 w-8 text-orange-500" />
+              <div className="absolute -right-1 -top-1 h-1.5 w-1.5 rounded-full bg-orange-500/60" />
             </div>
-            <span className="hidden font-bold sm:inline-block">
-              AB‑<span className="text-primary">Network</span>
+            <span className="hidden font-bold sm:inline-block text-lg">
+              AB‑<span className="text-orange-500 text-lg">Network</span>
             </span>
           </Link>
           {user && (

@@ -112,7 +112,7 @@ export async function calculateUserSalaryForMonth(
   });
 
   // Get approved advances not yet deducted
-  const advances = await prisma.advanceSalary.findMany({
+  const newAdvances = await prisma.advanceSalary.findMany({
     where: {
       userId,
       status: "APPROVED",
@@ -125,18 +125,21 @@ export async function calculateUserSalaryForMonth(
   // Use actual days in month for daily rate calculation
   const daysInMonth = endDate.getDate();
 
-  // Use stored eidBonus from processed festival bonus if available
+  // Use stored eidBonus + advance deduction from existing record if available
   const existingRecord = await prisma.salaryRecord.findUnique({
     where: { userId_month: { userId, month: startDate } },
-    select: { eidBonus: true },
+    select: { eidBonus: true, advanceDeduction: true },
   });
   const eidBonus = existingRecord?.eidBonus ?? 0;
+  const storedAdvance = existingRecord?.advanceDeduction ?? 0;
+  const totalAdvance =
+    storedAdvance + newAdvances.reduce((s, a) => s + a.amount, 0);
 
   return calculateEmployeeSalary({
     userId,
     monthlySalary: user.monthlySalary,
     attendances,
-    approvedAdvances: advances,
+    approvedAdvances: totalAdvance > 0 ? [{ amount: totalAdvance }] : [],
     daysInMonth,
     eidBonus,
   });
@@ -152,7 +155,13 @@ export async function calculateAllSalariesForMonth(
 
   // Get all employees
   const employees = await prisma.user.findMany({
-    where: { role: "EMPLOYEE" },
+    where: {
+      role: "EMPLOYEE",
+      OR: [
+        { joinedAt: null },
+        { joinedAt: { lte: endDate } },
+      ],
+    },
     select: { id: true, monthlySalary: true },
   });
 
@@ -195,30 +204,37 @@ export async function calculateAllSalariesForMonth(
   // Use actual days in month for daily rate calculation
   const daysInMonth = endDate.getDate();
 
-  // Batch-fetch stored eidBonus for this month from salary records
+  // Batch-fetch stored advance deduction + eidBonus for this month
   const thisMonthRecords = await prisma.salaryRecord.findMany({
     where: {
       userId: { in: employees.map((e) => e.id) },
       month: startDate,
     },
-    select: { userId: true, eidBonus: true },
+    select: { userId: true, eidBonus: true, advanceDeduction: true },
   });
   const eidBonusMap = new Map<string, number>();
+  const storedAdvanceMap = new Map<string, number>();
   for (const r of thisMonthRecords) {
     if (r.eidBonus > 0) eidBonusMap.set(r.userId, r.eidBonus);
+    storedAdvanceMap.set(r.userId, r.advanceDeduction);
   }
 
   const results = new Map<string, SalaryCalculationResult>();
   for (const emp of employees) {
     const eidBonus = eidBonusMap.get(emp.id) ?? 0;
+    const storedAdvance = storedAdvanceMap.get(emp.id) ?? 0;
+    const newAdvances = advancesMap.get(emp.id) || [];
+    const totalAdvanceAmount =
+      storedAdvance + newAdvances.reduce((s, a) => s + a.amount, 0);
 
     const attendances = attendancesMap.get(emp.id) || [];
-    const advances = advancesMap.get(emp.id) || [];
     const result = calculateEmployeeSalary({
       userId: emp.id,
       monthlySalary: emp.monthlySalary,
       attendances,
-      approvedAdvances: advances,
+      approvedAdvances: totalAdvanceAmount > 0
+        ? [{ amount: totalAdvanceAmount }]
+        : [],
       daysInMonth,
       eidBonus,
     });

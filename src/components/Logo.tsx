@@ -22,12 +22,6 @@ export function Logo({
 
   return (
     <Link href="/" className={`flex items-center gap-2 group ${className}`}>
-      <div className="relative">
-        <Wifi
-          className={`${size.icon} text-primary transition-transform group-hover:scale-110`}
-        />
-        <div className="absolute -right-1 -top-1 h-1.5 w-1.5 rounded-full bg-primary/60" />
-      </div>
       <div className="flex flex-col">
         <span className={`font-bold tracking-tight ${size.text}`}>
           AB‑<span className="text-primary">Network</span>

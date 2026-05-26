@@ -20,6 +20,13 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { toast } from "sonner";
 import { TrendingUp, Loader2, Download, CheckCircle, Gift } from "lucide-react";
 import { format } from "date-fns";
@@ -54,6 +61,9 @@ interface SalaryData {
     advanceDeduction: number;
     eidBonus: number;
     netPayable: number;
+    recordId: string | null;
+    paid: boolean;
+    paidAt: string | null;
   }>;
   daysInMonth: number;
   month: string;
@@ -117,6 +127,9 @@ export function AdminSalaryClient({
   const [loading, setLoading] = useState(false);
   const [bonusLoading, setBonusLoading] = useState<string | null>(null);
   const [payrollLoading, setPayrollLoading] = useState(false);
+  const [selectedYear, setSelectedYear] = useState(currentYear);
+  const [selectedMonth, setSelectedMonth] = useState(currentMonth);
+  const [monthLoading, setMonthLoading] = useState(false);
 
   const monthNames = [
     "January",
@@ -136,17 +149,16 @@ export function AdminSalaryClient({
   const handleRunPayroll = async () => {
     if (
       !confirm(
-        "Run payroll for this month? This will create/update salary records and mark advances as deducted.",
+        `Run payroll for ${monthNames[selectedMonth]} ${selectedYear}? This will create/update salary records and mark advances as deducted.`,
       )
     )
       return;
     setPayrollLoading(true);
     try {
-      await runPayroll(currentYear, currentMonth);
-      // Refresh data
+      await runPayroll(selectedYear, selectedMonth);
       const newData = await (
         await import("@/actions/salary")
-      ).getSalaryData(currentYear, currentMonth);
+      ).getSalaryData(selectedYear, selectedMonth);
       setSalaryData(newData as SalaryData);
       const newHistory = await (
         await import("@/actions/salary")
@@ -166,9 +178,14 @@ export function AdminSalaryClient({
     setLoading(true);
     try {
       await markSalaryPaid(recordId);
-      const newHistory = await (
-        await import("@/actions/salary")
-      ).getSalaryHistory();
+      const [newData, newHistory] = await Promise.all([
+        (await import("@/actions/salary")).getSalaryData(
+          selectedYear,
+          selectedMonth,
+        ),
+        (await import("@/actions/salary")).getSalaryHistory(),
+      ]);
+      setSalaryData(newData as SalaryData);
       setHistory(newHistory as SalaryRecord[]);
       toast.success(`Salary marked as paid for ${employeeName}`);
     } catch (error) {
@@ -196,11 +213,11 @@ export function AdminSalaryClient({
     XLSX.utils.book_append_sheet(
       workbook,
       worksheet,
-      `Salary_${monthNames[currentMonth]}_${currentYear}`,
+      `Salary_${monthNames[selectedMonth]}_${selectedYear}`,
     );
     XLSX.writeFile(
       workbook,
-      `salary_${currentYear}_${monthNames[currentMonth]}.xlsx`,
+      `salary_${selectedYear}_${monthNames[selectedMonth]}.xlsx`,
     );
     toast.success("Exported to Excel");
   };
@@ -215,12 +232,30 @@ export function AdminSalaryClient({
   const refreshSalaryData = async () => {
     const newData = await (
       await import("@/actions/salary")
-    ).getSalaryData(currentYear, currentMonth);
+    ).getSalaryData(selectedYear, selectedMonth);
     setSalaryData(newData as SalaryData);
     const newHistory = await (
       await import("@/actions/salary")
     ).getSalaryHistory();
     setHistory(newHistory as SalaryRecord[]);
+  };
+
+  const handleMonthChange = async (year: number, month: number) => {
+    setSelectedYear(year);
+    setSelectedMonth(month);
+    setMonthLoading(true);
+    try {
+      const [newData, newHistory] = await Promise.all([
+        (await import("@/actions/salary")).getSalaryData(year, month),
+        (await import("@/actions/salary")).getSalaryHistory(),
+      ]);
+      setSalaryData(newData as SalaryData);
+      setHistory(newHistory as SalaryRecord[]);
+    } catch {
+      toast.error("Failed to load salary data");
+    } finally {
+      setMonthLoading(false);
+    }
   };
 
   const handleMarkBonusPaid = async (paymentId: string, empName: string) => {
@@ -273,37 +308,63 @@ export function AdminSalaryClient({
     }
   };
 
-  // Override current month history netPayable with dynamically calculated values
-  const currentMonthDynamic = new Map<string, number>();
+  // Override selected month history netPayable with dynamically calculated values
+  const selectedMonthDynamic = new Map<string, number>();
   for (const emp of salaryData.salaryData) {
-    currentMonthDynamic.set(emp.userId, emp.netPayable);
+    selectedMonthDynamic.set(emp.userId, emp.netPayable);
   }
   const displayHistory = history.map((record) => {
-    const isCurrentMonth =
-      new Date(record.month).getMonth() === currentMonth &&
-      new Date(record.month).getFullYear() === currentYear;
-    if (!isCurrentMonth) return record;
-    const dynamicNet = currentMonthDynamic.get(record.userId);
+    const isSelectedMonth =
+      new Date(record.month).getMonth() === selectedMonth &&
+      new Date(record.month).getFullYear() === selectedYear;
+    if (!isSelectedMonth) return record;
+    const dynamicNet = selectedMonthDynamic.get(record.userId);
     if (dynamicNet === undefined) return record;
     return { ...record, netPayable: dynamicNet };
   });
 
-  // Calculate total paid (salary + bonus) for current month
-  const currentMonthHistory = displayHistory.filter(
+  // Calculate total paid (salary + bonus) for selected month
+  const selectedMonthHistory = displayHistory.filter(
     (r) =>
-      new Date(r.month).getMonth() === currentMonth &&
-      new Date(r.month).getFullYear() === currentYear,
+      new Date(r.month).getMonth() === selectedMonth &&
+      new Date(r.month).getFullYear() === selectedYear,
   );
-  const totalSalaryPaid = currentMonthHistory
+  const totalSalaryPaid = selectedMonthHistory
     .filter((r) => r.paid)
     .reduce((sum, r) => sum + r.netPayable, 0);
-  const totalPaidBonusAmount = allBonusPayments
+
+  const filteredFestivalBonuses = festivalBonuses.filter((fb: any) => {
+    const d = new Date(fb.bonusDate);
+    return d.getMonth() === selectedMonth && d.getFullYear() === selectedYear;
+  });
+
+  const filteredBonusPaymentsList =
+    filteredFestivalBonuses.length > 0
+      ? filteredFestivalBonuses.flatMap(
+          (fb: any) => bonusPayments[fb.id] || [],
+        )
+      : [];
+
+  const totalPaidBonusAmount = filteredBonusPaymentsList
     .filter((bp) => bp.paid)
     .reduce((sum, bp) => sum + bp.amount, 0);
   const totalPaidThisMonth = totalSalaryPaid + totalPaidBonusAmount;
 
   const totalNetPayable = salaryData.salaryData.reduce(
     (sum, e) => sum + e.netPayable,
+    0,
+  );
+
+  const filteredHistory = selectedMonthHistory;
+
+  const filteredTotalBonusPaid = filteredBonusPaymentsList.filter(
+    (bp) => bp.paid,
+  ).length;
+  const filteredTotalBonusPending = filteredBonusPaymentsList.filter(
+    (bp) => !bp.paid,
+  ).length;
+  const filteredTotalBonusAmount = filteredBonusPaymentsList.reduce(
+    (s, bp) => s + bp.amount,
     0,
   );
 
@@ -318,11 +379,49 @@ export function AdminSalaryClient({
         variants={fadeInUp}
         className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
       >
-        <div>
-          <h1 className="text-2xl font-bold">Salary Management</h1>
-          <p className="text-muted-foreground">
-            Run payroll, view employee salaries, and manage payments
-          </p>
+        <div className="flex items-center gap-4">
+          <div>
+            <h1 className="text-2xl font-bold">Salary Management</h1>
+            <p className="text-muted-foreground">
+              Run payroll, view employee salaries, and manage payments
+            </p>
+          </div>
+          <div className="flex items-center gap-2" role="group" aria-label="Month selector">
+            <Select
+              value={String(selectedMonth)}
+              onValueChange={(v) => handleMonthChange(selectedYear, Number(v))}
+            >
+              <SelectTrigger className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {monthNames.map((name, idx) => (
+                  <SelectItem key={idx} value={String(idx)}>
+                    {name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select
+              value={String(selectedYear)}
+              onValueChange={(v) => handleMonthChange(Number(v), selectedMonth)}
+            >
+              <SelectTrigger className="w-24">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Array.from(
+                  { length: currentYear - 2019 },
+                  (_, i) => currentYear - i,
+                ).map((year) => (
+                  <SelectItem key={year} value={String(year)}>
+                    {year}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {monthLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+          </div>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={exportCurrentToExcel}>
@@ -364,7 +463,7 @@ export function AdminSalaryClient({
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm">
-              Total Paid This Month
+              Total Paid ({monthNames[selectedMonth]})
               {totalPaidThisMonth > 0 && (
                 <span className="text-xs text-muted-foreground font-normal ml-1">
                   (salary + bonus)
@@ -405,14 +504,14 @@ export function AdminSalaryClient({
         <Tabs defaultValue="current">
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="current">
-              Current Month ({monthNames[currentMonth]} {currentYear})
+              {monthNames[selectedMonth]} {selectedYear}
             </TabsTrigger>
             <TabsTrigger value="bonus">
               <Gift className="h-4 w-4 mr-1" />
               Bonus Payments
-              {totalBonusPending > 0 && (
+              {filteredTotalBonusPending > 0 && (
                 <span className="ml-1 text-xs bg-yellow-100 text-yellow-800 px-1.5 py-0.5 rounded-full">
-                  {totalBonusPending}
+                  {filteredTotalBonusPending}
                 </span>
               )}
             </TabsTrigger>
@@ -440,6 +539,7 @@ export function AdminSalaryClient({
                       <TableHead>Advance Deduction</TableHead>
                       <TableHead>Bonus</TableHead>
                       <TableHead>Net Payable</TableHead>
+                      <TableHead>Status</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -466,7 +566,7 @@ export function AdminSalaryClient({
                         </TableCell>
                         <TableCell className="text-green-600">
                           {(() => {
-                            const monthKey = `${emp.userId}:${currentYear}-${currentMonth}`;
+                            const monthKey = `${emp.userId}:${selectedYear}-${selectedMonth}`;
                             const bp = bonusLookup[monthKey];
                             if (bp) {
                               return (
@@ -485,6 +585,36 @@ export function AdminSalaryClient({
                         </TableCell>
                         <TableCell className="font-bold">
                           {formatCurrency(emp.netPayable)}
+                        </TableCell>
+                        <TableCell>
+                          {emp.paid ? (
+                            <Badge className="bg-green-100 text-green-700">
+                              Paid
+                            </Badge>
+                          ) : emp.recordId ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                handleMarkPaid(
+                                  emp.recordId!,
+                                  emp.name,
+                                )
+                              }
+                              disabled={loading}
+                            >
+                              {loading ? (
+                                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                              ) : (
+                                <CheckCircle className="h-3 w-3 mr-1" />
+                              )}
+                              Mark Paid
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">
+                              Run payroll first
+                            </span>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -505,7 +635,7 @@ export function AdminSalaryClient({
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold">
-                      {formatCurrency(totalBonusAmount)}
+                      {formatCurrency(filteredTotalBonusAmount)}
                     </div>
                   </CardContent>
                 </Card>
@@ -517,9 +647,9 @@ export function AdminSalaryClient({
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold text-green-600">
-                      {totalBonusPaid}
+                      {filteredTotalBonusPaid}
                       <span className="text-sm text-muted-foreground ml-1">
-                        / {allBonusPayments.length}
+                        / {filteredBonusPaymentsList.length}
                       </span>
                     </div>
                   </CardContent>
@@ -532,28 +662,21 @@ export function AdminSalaryClient({
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold text-yellow-600">
-                      {totalBonusPending}
+                      {filteredTotalBonusPending}
                     </div>
                   </CardContent>
                 </Card>
               </div>
 
-              {festivalBonuses.length === 0 ? (
+              {filteredFestivalBonuses.length === 0 ? (
                 <Card>
                   <CardContent className="py-8 text-center text-muted-foreground">
-                    No festival bonuses have been processed yet. Go to Settings
-                    &gt; Bonus to create and process a festival bonus.
+                    No festival bonuses for{" "}
+                    {monthNames[selectedMonth]} {selectedYear}.
                   </CardContent>
                 </Card>
               ) : (
-                (() => {
-                  // Show only the latest processed festival bonus
-                  const latestBonus = festivalBonuses.sort(
-                    (a: any, b: any) =>
-                      new Date(b.bonusDate).getTime() -
-                      new Date(a.bonusDate).getTime(),
-                  )[0];
-                  const fb = latestBonus;
+                filteredFestivalBonuses.map((fb: any) => {
                   const payments = bonusPayments[fb.id] || [];
                   const paidCount = payments.filter(
                     (p: BonusPaymentItem) => p.paid,
@@ -702,7 +825,7 @@ export function AdminSalaryClient({
                       </CardContent>
                     </Card>
                   );
-                })()
+                })
               )}
             </motion.div>
           </TabsContent>
@@ -712,7 +835,7 @@ export function AdminSalaryClient({
               <CardHeader>
                 <CardTitle>Past Salary Records</CardTitle>
                 <CardDescription>
-                  View and manage historical payroll
+                  {monthNames[selectedMonth]} {selectedYear}
                 </CardDescription>
               </CardHeader>
               <CardContent className="overflow-x-auto">
@@ -733,7 +856,16 @@ export function AdminSalaryClient({
                   </TableHeader>
                   <TableBody>
                     {(() => {
-                      const totals = displayHistory.reduce(
+                      if (filteredHistory.length === 0) {
+                        return (
+                          <TableRow>
+                            <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
+                              No salary records for {monthNames[selectedMonth]} {selectedYear}.
+                            </TableCell>
+                          </TableRow>
+                        );
+                      }
+                      const totals = filteredHistory.reduce(
                         (acc, r) => {
                           const monthKey = `${r.userId}:${new Date(r.month).getFullYear()}-${new Date(r.month).getMonth()}`;
                           const bp = bonusLookup[monthKey];
@@ -748,7 +880,7 @@ export function AdminSalaryClient({
                       );
                       return (
                         <>
-                          {displayHistory.map((record) => {
+                          {filteredHistory.map((record) => {
                             const monthKey = `${record.userId}:${new Date(record.month).getFullYear()}-${new Date(record.month).getMonth()}`;
                             const bp = bonusLookup[monthKey];
                             const bonusCellContent = bp ? (
