@@ -1,0 +1,184 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// 👇 The rest of your models (User, Attendance, etc.) remain exactly the same from our last update
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  password      String
+  name          String
+  role          Role     @default(EMPLOYEE)
+  monthlySalary Float    @default(10000)
+  leaveQuota    Int      @default(12)
+  joinedAt      DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  attendances   Attendance[]
+  leaves        Leave[]
+  advances      AdvanceSalary[]
+  salaryRecords       SalaryRecord[]
+  auditLogs           AuditLog[]
+  festivalBonusPayments FestivalBonusPayment[]
+}
+
+model Attendance {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date      DateTime         @default(now())
+  status    AttendanceStatus @default(PRESENT)
+  halfDay   Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  @@unique([userId, date])
+}
+
+model Leave {
+  id         String      @id @default(cuid())
+  userId     String
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type       LeaveType
+  startDate  DateTime
+  endDate    DateTime
+  reason     String?
+  status     LeaveStatus @default(PENDING)
+  approvedBy String?
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+}
+
+model AdvanceSalary {
+  id               String        @id @default(cuid())
+  userId           String
+  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount           Float
+  reason           String?
+  status           AdvanceStatus @default(PENDING)
+  approvedBy       String?
+  deductedInSalary Boolean       @default(false)
+  salaryMonth      DateTime?
+  requestedAt      DateTime      @default(now())
+  approvedAt       DateTime?
+  paidAt           DateTime?
+}
+
+model SalaryRecord {
+  id                  String    @id @default(cuid())
+  userId              String
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  month               DateTime
+  grossSalary         Float
+  absentDays          Int
+  halfDays            Int
+  attendanceDeduction Float
+  advanceDeduction    Float
+  eidBonus            Float     @default(0)
+  netPayable          Float
+  paid                Boolean   @default(false)
+  paidAt              DateTime?
+  exportedAt          DateTime?
+  createdAt           DateTime  @default(now())
+
+  @@unique([userId, month])
+}
+
+model WorkingDaySetting {
+  id        String   @id @default(cuid())
+  month     DateTime @unique
+  daysCount Int
+  notes     String?
+  setBy     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model FestivalBonus {
+  id              String   @id @default(cuid())
+  name            String
+  bonusDate       DateTime
+  bonusPercentage Int      @default(50)
+  processed       Boolean  @default(false)
+  processedAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  payments        FestivalBonusPayment[]
+}
+
+model FestivalBonusPayment {
+  id              String   @id @default(cuid())
+  festivalBonusId String
+  festival        FestivalBonus @relation(fields: [festivalBonusId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount          Float
+  paid            Boolean  @default(false)
+  paidAt          DateTime?
+  createdAt       DateTime @default(now())
+
+  @@unique([festivalBonusId, userId])
+}
+
+model GlobalSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  action    String
+  targetId  String
+  details   String?
+  createdAt DateTime @default(now())
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  EMPLOYEE
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  HOLIDAY
+}
+
+model Holiday {
+  id        String   @id @default(cuid())
+  name      String
+  date      DateTime
+  createdAt DateTime @default(now())
+
+  @@unique([name, date])
+}
+
+enum LeaveType {
+  SICK
+  CASUAL
+  ANNUAL
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum AdvanceStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PAID
+}
