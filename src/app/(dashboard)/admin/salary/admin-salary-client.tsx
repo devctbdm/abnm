@@ -21,14 +21,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import {
-  TrendingUp,
-  Loader2,
-  Download,
-  CheckCircle,
-  Gift,
-  Clock,
-} from "lucide-react";
+import { TrendingUp, Loader2, Download, CheckCircle, Gift } from "lucide-react";
 import { format } from "date-fns";
 import { runPayroll, markSalaryPaid } from "@/actions/salary";
 import { markBonusPaid, markAllBonusesPaid } from "@/actions/festival-bonus";
@@ -109,7 +102,6 @@ interface AdminSalaryClientProps {
 }
 
 export function AdminSalaryClient({
-  session,
   currentMonthData,
   salaryHistory,
   festivalBonuses,

@@ -55,7 +55,15 @@ export function calculateEmployeeSalary(
     }
   }
 
-  const dailyRate = monthlySalary / daysInMonth;
+  // Count days without any attendance record as absent
+  const daysWithRecords = presentDays + halfDays + absentDays;
+  const daysWithoutRecords = daysInMonth - daysWithRecords;
+  if (daysWithoutRecords > 0) {
+    absentDays += daysWithoutRecords;
+  }
+
+  // Use standard 30-day month for daily rate (monthly salary system)
+  const dailyRate = monthlySalary / 30;
   const attendanceDeduction =
     absentDays * dailyRate + halfDays * dailyRate * 0.5;
   const advanceDeduction = approvedAdvances.reduce(

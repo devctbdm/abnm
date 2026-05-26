@@ -136,6 +136,13 @@ export async function getSalaryData(year: number, month: number) {
         }
       }
 
+      // Count days without any attendance record as absent
+      const daysWithRecords = presentDays + halfDays + absentDays;
+      const daysWithoutRecords = daysInMonth - daysWithRecords;
+      if (daysWithoutRecords > 0) {
+        absentDays += daysWithoutRecords;
+      }
+
       // Use stored advance deduction if payroll already ran, otherwise compute live
       let advanceDeduction = storedAdvanceMap.get(emp.id);
       if (advanceDeduction === undefined) {
@@ -151,7 +158,8 @@ export async function getSalaryData(year: number, month: number) {
         advanceDeduction = advances.reduce((sum, a) => sum + a.amount, 0);
       }
 
-      const dailyRate = emp.monthlySalary / daysInMonth;
+      // Use standard 30-day month for daily rate (monthly salary system)
+      const dailyRate = emp.monthlySalary / 30;
       const attendanceDeduction =
         absentDays * dailyRate + halfDays * dailyRate * 0.5;
 
@@ -240,7 +248,7 @@ export async function getSalaryHistory() {
   }
 
   // Adjust netPayable by excluding paid bonuses and fill missing advance deductions
-  return records.map((record) => {
+  const adjusted = records.map((record) => {
     const monthKey = `${record.userId}:${record.month.getFullYear()}-${record.month.getMonth()}`;
     const paidBonusAmount = paidBonusLookup.get(monthKey) ?? 0;
 
@@ -264,6 +272,16 @@ export async function getSalaryHistory() {
       eidBonus: paidBonusAmount > 0 ? 0 : record.eidBonus,
     };
   });
+
+  // Return only the latest record per user to avoid showing the same user across multiple months
+  const latestPerUser = new Map<string, (typeof adjusted)[0]>();
+  for (const record of adjusted) {
+    const existing = latestPerUser.get(record.userId);
+    if (!existing || record.month > existing.month) {
+      latestPerUser.set(record.userId, record);
+    }
+  }
+  return Array.from(latestPerUser.values());
 }
 
 export async function markSalaryPaid(recordId: string) {
