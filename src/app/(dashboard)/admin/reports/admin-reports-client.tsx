@@ -159,7 +159,7 @@ export function AdminReportsClient() {
             <th className="text-left p-2">Bonus</th>
             <th className="text-left p-2">Absent</th>
             <th className="text-left p-2">Holiday</th>
-            <th className="text-left p-2">Advance Salary Deduction</th>
+            <th className="text-left p-2">Attendance Deduction</th>
             <th className="text-left p-2">Net Payable</th>
             <th className="text-left p-2">Net+Bonus</th>
             <th className="text-left p-2">Payment Status</th>
